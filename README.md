@@ -22,7 +22,7 @@
 - entity_linker.py          通用实体链接（基于 fuzzy/rapidfuzz）
 - entity_alignment.py       实体对齐特征与简单判定器
 - kg_builder.py             SQLite KG 构建（批量/事务/单例连接）
-- run_stage1.py             演示脚本：从 Yidu-S4K 提取实体并构建 KG、识别+链接示例
+- run.py             演示脚本：从 Yidu-S4K 提取实体并构建 KG、识别+链接示例
 - requirements.txt          依赖（见说明）
 
 ---

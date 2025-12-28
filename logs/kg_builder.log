@@ -1,0 +1,19 @@
+2025-12-28 16:46:42,842 - root - INFO - 日志系统已初始化
+2025-12-28 16:46:42,843 - root - INFO - 启动阶段一示例流程
+2025-12-28 16:46:42,845 - root - INFO - Yidu-S4K 数据路径: /home/gamma/code/Git/medical-kg-lightweight/data/yidu_s4k
+2025-12-28 16:46:42,850 - kg_builder - INFO - 数据库连接已建立:  /home/gamma/code/Git/medical-kg-lightweight/medical_kg. db
+2025-12-28 16:56:00,383 - root - INFO - 日志系统已初始化
+2025-12-28 16:56:00,383 - root - INFO - 启动阶段一示例流程
+2025-12-28 16:56:00,384 - root - INFO - Yidu-S4K 数据路径: /home/gamma/code/Git/medical-kg-lightweight/data/yidu_s4k
+2025-12-28 16:56:00,387 - kg_builder - INFO - 数据库连接已建立:  /home/gamma/code/Git/medical-kg-lightweight/medical_kg. db
+2025-12-28 16:56:00,465 - kg_builder - INFO - 数据库表初始化成功
+2025-12-28 16:56:00,466 - root - INFO - 从数据集中提取实体（可能耗时）...
+2025-12-28 16:57:43,041 - root - INFO - 日志系统已初始化
+2025-12-28 16:57:43,042 - root - INFO - 启动阶段一示例流程
+2025-12-28 16:57:43,043 - root - INFO - Yidu-S4K 数据路径: /home/gamma/code/Git/medical-kg-lightweight/data/yidu_s4k
+2025-12-28 16:57:43,048 - kg_builder - INFO - 数据库连接已建立:  /home/gamma/code/Git/medical-kg-lightweight/medical_kg. db
+2025-12-28 16:57:43,111 - kg_builder - INFO - 数据库表初始化成功
+2025-12-28 16:57:43,112 - root - INFO - 从数据集中提取实体（可能耗时）...
+2025-12-28 16:57:43,211 - data_loader - INFO - 从 Yidu-S4K 提取 0 个唯一实体 (遍历条数: 0)
+2025-12-28 16:57:43,213 - root - WARNING - 未提取到实体，请确认数据集格式是否正确
+2025-12-28 16:57:43,214 - root - INFO - 示例文本: 患者因胸痛入院，既往高血压史，给予阿司匹林100mg口服。

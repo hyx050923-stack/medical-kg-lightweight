@@ -3,6 +3,7 @@ import json
 import logging
 from typing import Iterator, Dict, List
 from pathlib import Path
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class YiduS4KDataLoader:
 
     def __init__(self, data_dir: str):
         self.data_dir = Path(data_dir)
+        print("[DEBUG] YiduS4KDataLoader data_dir =", self.data_dir)
         if not self.data_dir.exists():
             raise FileNotFoundError(f"数据集目录不存在: {data_dir}")
 
@@ -55,6 +57,11 @@ class YiduS4KDataLoader:
         - split: 'part1', 'part2', 或 'all'
         Yidu-S4K 的训练文件通常是 JSONL，每行一个 JSON 对象。
         """
+        # 如果存在 txt 训练集，优先用 txt
+        txt1 = os.path.join(self.data_dir, "subtask1_training_part1.txt")
+        if os.path.exists(txt1):
+            yield from self.load_task1_training_from_txt()
+            return
         if split in ['part1', 'all']:
             p1 = self.data_dir / 'subtask1_training_part1.txt'
             yield from self._load_jsonl(p1)
@@ -114,3 +121,86 @@ class YiduS4KDataLoader:
             })
         logger.info(f"从 Yidu-S4K 提取 {len(result)} 个唯一实体 (遍历条数: {count})")
         return result
+    
+    # data_loader.py 中新增
+    def load_task1_training_from_txt(self):
+        """
+        解析 Yidu-S4K Task1 的 subtask1_training_part*.txt（JSONL 格式）
+        输出统一格式：
+        {
+            "text": 原文,
+            "entities": [
+                {"text": 实体文本, "type": 实体类型}
+            ]
+        }
+        """
+        files = [
+            "subtask1_training_part1.txt",
+            "subtask1_training_part2.txt"
+        ]
+
+        for fname in files:
+            path = os.path.join(self.data_dir, fname)
+            if not os.path.exists(path):
+                continue
+
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        sample = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    text = sample.get("originalText", "")
+                    entities = []
+
+                    for ent in sample.get("entities", []):
+                        start = ent.get("start_pos")
+                        end = ent.get("end_pos")
+                        label = ent.get("label_type")
+
+                        if start is None or end is None:
+                            continue
+
+                        mention_text = text[start:end]
+
+                        entities.append({
+                            "text": mention_text,
+                            "type": label
+                        })
+
+                    if entities:
+                        yield {
+                            "text": text,
+                            "entities": entities
+                        }
+
+    def _bio_to_record(self, chars, labels):
+        text = "".join(chars)
+        entities = []
+
+        i = 0
+        while i < len(labels):
+            label = labels[i]
+            if label.startswith("B-"):
+                ent_type = label[2:]
+                start = i
+                i += 1
+                while i < len(labels) and labels[i].startswith("I-"):
+                    i += 1
+                ent_text = "".join(chars[start:i])
+                entities.append({
+                    "text": ent_text,
+                    "type": ent_type.lower()
+                })
+            else:
+                i += 1
+
+        return {
+            "text": text,
+            "entities": entities
+        }

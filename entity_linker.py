@@ -147,3 +147,12 @@ class UniversalEntityLinker:
             'aliases': aliases,
             'type': entity_type
         })
+
+    def get_candidates(self, mention_text, topn=50):
+        scored = []
+        for e in self.entities:   # 855 个实体
+            score = fuzz.partial_ratio(mention_text, e["name"])
+            scored.append((score, e))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [e for _, e in scored[:topn]]

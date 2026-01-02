@@ -43,64 +43,59 @@ class MedicalEntityAligner:
     def __init__(self):
         self.scaler = MinMaxScaler()
     
-    def extract_features(self, entity1: dict, entity2: dict) -> np.ndarray:
+    def extract_features(self, e1: dict, e2: dict) -> np.ndarray:
         """
-        提取实体对的特征向量 (维度=8)
-        
-        特征1: 字符串相似度 (Token Set Ratio)
-        特征2: 字符串相似度 (Partial Ratio)
-        特征3: 实体类型匹配度 (0/1)
-        特征4: 缩写归一化后的相似度
-        特征5: 数字单位匹配度
-        特征6: 长度差异惩罚 (归一化)
-        特征7: 共享关键词数量
-        特征8: 医学同义词库匹配度
+        e1: {'name': mention_text, 'type': mention_type}
+        e2: {'name': entity_name, 'type': entity_type}
         """
-        features = []
-        
-        name1, type1 = entity1['name'], entity1['type']
-        name2, type2 = entity2['name'], entity2['type']
-        
-        # 特征1: Token Set Ratio
-        f1 = fuzz.token_set_ratio(name1, name2) / 100.0
-        features.append(f1)
-        
-        # 特征2: Partial Ratio
-        f2 = fuzz.partial_ratio(name1, name2) / 100.0
-        features.append(f2)
-        
-        # 特征3: 实体类型匹配
-        f3 = 1.0 if type1 == type2 else 0.0
-        features.append(f3)
-        
-        # 特征4: 缩写归一化相似度
-        norm1 = self._normalize_abbreviation(name1)
-        norm2 = self._normalize_abbreviation(name2)
-        f4 = fuzz.token_set_ratio(norm1, norm2) / 100.0 if norm1 != name1 or norm2 != name2 else 0.0
-        features. append(f4)
-        
-        # 特征5: 数字单位匹配
-        f5 = self._match_numeric_units(name1, name2)
-        features.append(f5)
-        
-        # 特征6: 长度差异惩罚
-        len_diff = abs(len(name1) - len(name2)) / max(len(name1), len(name2))
-        f6 = 1.0 - min(len_diff, 0.5)  # 最多惩罚0.5
-        features.append(f6)
-        
-        # 特征7: 共享关键词
-        tokens1 = set(name1.split())
-        tokens2 = set(name2.split())
-        shared = len(tokens1 & tokens2)
-        f7 = shared / max(len(tokens1), len(tokens2)) if max(len(tokens1), len(tokens2)) > 0 else 0.0
-        features. append(f7)
-        
-        # 特征8: 实体类型不兼容惩罚
-        types_key = tuple(sorted([type1, type2]))
-        f8 = 0.0 if self. ENTITY_TYPE_INCOMPATIBLE. get(types_key, True) else 0.3
-        features.append(f8)
-        
-        return np. array(features)
+
+        name1 = e1['name']
+        name2 = e2['name']
+
+        # ---------- 基础文本特征（削弱极端值） ----------
+        token_set = fuzz.token_set_ratio(name1, name2) / 100.0
+        token_sort = fuzz.token_sort_ratio(name1, name2) / 100.0
+        partial = fuzz.partial_ratio(name1, name2) / 100.0
+
+        # clip，防止 1.0 成为完美信号
+        token_set = min(token_set, 0.95)
+        token_sort = min(token_sort, 0.95)
+        partial = min(partial, 0.95)
+
+        # ---------- 长度特征 ----------
+        len1 = len(name1)
+        len2 = len(name2)
+        len_diff = abs(len1 - len2) / max(len1, len2, 1)
+        len_ratio = min(len1, len2) / max(len1, len2, 1)
+
+        # ---------- 字符级重叠 ----------
+        set1 = set(name1)
+        set2 = set(name2)
+        char_jaccard = len(set1 & set2) / max(len(set1 | set2), 1)
+
+        # ---------- 类型特征 ----------
+        same_type = int(e1.get('type') == e2.get('type'))
+
+        # ---------- 包含关系（弱信号） ----------
+        contain = int(name1 in name2 or name2 in name1)
+
+        # ---------- 正则化 exact match（关键！） ----------
+        exact_match = int(name1 == name2)
+        exact_match_soft = exact_match * 0.1  # 只能是弱提示
+
+        features = np.array([
+            token_set,
+            token_sort,
+            partial,
+            char_jaccard,
+            len_diff,
+            len_ratio,
+            same_type,
+            contain,
+            exact_match_soft
+        ], dtype=np.float32)
+
+        return features
     
     @staticmethod
     def _normalize_abbreviation(text: str) -> str:

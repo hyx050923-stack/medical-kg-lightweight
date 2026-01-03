@@ -148,11 +148,54 @@ class UniversalEntityLinker:
             'type': entity_type
         })
 
-    def get_candidates(self, mention_text, topn=50):
+    def get_candidates(self, mention_text, mention_type=None, max_candidates=15):
+        """
+        获取候选实体列表 (升级版：支持部分匹配)
+        """
         scored = []
-        for e in self.entities:   # 855 个实体
-            score = fuzz.partial_ratio(mention_text, e["name"])
-            scored.append((score, e))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [e for _, e in scored[:topn]]
+        
+        # 修复属性不存在的bug，聚合所有缓存实体
+        all_entities = []
+        for type_list in self.entity_cache.values():
+            all_entities.extend(type_list)
+            
+        m_text_lower = mention_text.lower()
+        
+        for e in all_entities:
+            e_name_lower = e['name'].lower()
+            
+            # 1. 全匹配分数
+            ratio_score = fuzz.ratio(m_text_lower, e_name_lower)
+            
+            # 2. 【关键新增】部分匹配分数 (解决 "心肌梗死" 匹配 "急性心肌梗死")
+            partial_score = fuzz.partial_ratio(m_text_lower, e_name_lower)
+            
+            # 3. 别名匹配
+            alias_score = 0
+            if e.get('aliases'):
+                # 处理别名是字符串还是列表的情况
+                alias_list = e['aliases'].split('|') if isinstance(e['aliases'], str) else e['aliases']
+                # 对别名也做全匹配
+                alias_scores = [fuzz.ratio(m_text_lower, a.lower()) for a in alias_list]
+                if alias_scores:
+                    alias_score = max(alias_scores)
+            
+            # 取三者最大值作为初筛分数
+            final_score = max(ratio_score, partial_score, alias_score)
+            
+            # 4. 类型加分 (可选)
+            if mention_type and e.get('type') == mention_type:
+                final_score += 5
+            
+            # 设定一个宽松的初筛门槛 (比如 50 分) 才能进入后续 Ranking
+            if final_score > 40: 
+                scored.append({
+                    "id": e['id'],
+                    "name": e['name'],
+                    "type": e.get('type', 'unknown'),
+                    "score": final_score
+                })
+        
+        # 按分数排序并截取 Top-K
+        scored.sort(key=lambda x: x['score'], reverse=True)
+        return scored[:max_candidates]

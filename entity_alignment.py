@@ -1,9 +1,10 @@
 import numpy as np
 import logging
+import re
 from typing import Tuple, List
 from sklearn.preprocessing import MinMaxScaler
-from fuzzywuzzy import fuzz
-
+from rapidfuzz import fuzz # 建议统一使用 rapidfuzz，速度更快
+from pypinyin import lazy_pinyin
 logger = logging.getLogger(__name__)
 
 class MedicalEntityAligner:
@@ -42,57 +43,57 @@ class MedicalEntityAligner:
     
     def __init__(self):
         self.scaler = MinMaxScaler()
+        self.core_suffixes = ['癌', '瘤', '炎', '术', '病', '综合征', '颗粒', '胶囊', '注射液']
+
+    def get_pinyin(self, text: str) -> str:
+        """转换简写拼音，如 '胃癌' -> 'wa'"""
+        return "".join(lazy_pinyin(text))
     
     def extract_features(self, e1: dict, e2: dict) -> np.ndarray:
-        """
-        e1: {'name': mention_text, 'type': mention_type}
-        e2: {'name': entity_name, 'type': entity_type}
-        """
-
-        name1 = e1['name']
-        name2 = e2['name']
-
-        # ---------- 基础文本特征（削弱极端值） ----------
-        token_set = fuzz.token_set_ratio(name1, name2) / 100.0
-        token_sort = fuzz.token_sort_ratio(name1, name2) / 100.0
-        partial = fuzz.partial_ratio(name1, name2) / 100.0
-
-        # clip，防止 1.0 成为完美信号
-        token_set = min(token_set, 0.95)
-        token_sort = min(token_sort, 0.95)
-        partial = min(partial, 0.95)
-
-        # ---------- 长度特征 ----------
-        len1 = len(name1)
-        len2 = len(name2)
-        len_diff = abs(len1 - len2) / max(len1, len2, 1)
+        name1 = e1.get('name', '')
+        name2 = e2.get('name', '')
+        
+        name1_norm = self._normalize_abbreviation(e1['name'].upper())
+        name2_norm = self._normalize_abbreviation(e2['name'].upper())
+        
+        # 1. 基础文本相似度 (Rapidfuzz)
+        token_set = fuzz.token_set_ratio(name1_norm, name2_norm) / 100.0
+        partial_ratio = fuzz.partial_ratio(name1_norm, name2_norm) / 100.0
+        
+        # 2. 拼音相似度 (解决同音错字: 阿司匹林 vs 阿斯匹林)
+        py1 = self.get_pinyin(name1_norm)
+        py2 = self.get_pinyin(name2_norm)
+        pinyin_sim = fuzz.ratio(py1, py2) / 100.0
+        
+        # 3. 医疗核心词匹配特征
+        # 如果两个词都包含相同的核心后缀（如都是“癌”），则该特征为 1
+        core_match = 0.0
+        for s in self.core_suffixes:
+            if s in name1_norm and s in name2_norm:
+                core_match = 1.0
+                break
+        
+        # 4. 长度与包含特征
+        len1, len2 = len(name1_norm), len(name2_norm)
         len_ratio = min(len1, len2) / max(len1, len2, 1)
+        is_contained = 1.0 if (name1_norm in name2_norm or name2_norm in name1_norm) else 0.0
+        
+        # 5. 类型匹配特征
+        type_match = 1.0 if e1.get('type') == e2.get('type') else 0.0
+        
+        #新增"缩写匹配"强特征
+        abbrev_match = 1.0 if name1_norm == name2_norm and e1['name'] != e2['name'] else 0.0
 
-        # ---------- 字符级重叠 ----------
-        set1 = set(name1)
-        set2 = set(name2)
-        char_jaccard = len(set1 & set2) / max(len(set1 | set2), 1)
-
-        # ---------- 类型特征 ----------
-        same_type = int(e1.get('type') == e2.get('type'))
-
-        # ---------- 包含关系（弱信号） ----------
-        contain = int(name1 in name2 or name2 in name1)
-
-        # ---------- 正则化 exact match（关键！） ----------
-        exact_match = int(name1 == name2)
-        exact_match_soft = exact_match * 0.1  # 只能是弱提示
-
+        # 构造特征向量 (增加了拼音和核心词维度)
         features = np.array([
-            token_set,
-            token_sort,
-            partial,
-            char_jaccard,
-            len_diff,
-            len_ratio,
-            same_type,
-            contain,
-            exact_match_soft
+            token_set,      # 集合相似度
+            partial_ratio,  # 部分匹配得分
+            pinyin_sim,     # 拼音相似度 [新增]
+            core_match,     # 医疗核心词命中 [新增]
+            len_ratio,      # 长度比例
+            is_contained,   # 包含关系
+            type_match,      # 类型一致性
+            abbrev_match
         ], dtype=np.float32)
 
         return features

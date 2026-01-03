@@ -50,30 +50,32 @@ def rank_entities_for_mention(
 # ------------------------------------------------
 # 主预测函数
 # ------------------------------------------------
+# predict.py
+
 def predict_text(
     text: str,
     clf,
     aligner,
     linker,
     topk: int = 3,
-    min_score: float = 0.4
+    min_score: float = 0.4  
 ) -> List[Dict]:
     """
-    对一段文本做实体识别 + 实体链接（Ranking）
+    端到端预测：输入文本 -> 识别 -> 链接
     """
+    # 1. 识别实体
     recognizer = MedicalEntityRecognizer()
     mentions = recognizer.recognize(text)
-
+    
     results = []
-
     for mention_text, mention_type, span in mentions:
-        # 1️⃣ Blocking：生成候选实体
+        # 2. 获取候选
         candidates = linker.get_candidates(
-            mention_text,
+            mention_text, 
             mention_type,
             max_candidates=15
         )
-
+        
         if not candidates:
             results.append({
                 "mention": mention_text,
@@ -83,7 +85,7 @@ def predict_text(
             })
             continue
 
-        # 2️⃣ Ranking
+        # 3. 排序
         ranked = rank_entities_for_mention(
             mention_text,
             mention_type,
@@ -92,10 +94,28 @@ def predict_text(
             aligner,
             topk=topk
         )
+        
+        # =======================================================
+        # 解决 "心肌梗死" 匹配 "急性心肌梗死" 分数过低的问题
+        # =======================================================
+        for r in ranked:
+            # 如果 mention 被包含在实体名中 (且不是完全不相关的词)
+            if len(mention_text) >= 2 and mention_text in r['entity_name']:
+                # 强行加分 (Boost)
+                # 原始分 0.09 + 0.5 = 0.59 (超过阈值)
+                r['score'] += 0.5
+                
+                # 封顶 1.0
+                if r['score'] > 1.0:
+                    r['score'] = 1.0
+        
+        # 重新排序（因为分数变了）
+        ranked.sort(key=lambda x: x["score"], reverse=True)
+        # =======================================================
 
         best = ranked[0]
 
-        # 3️⃣ 决策（支持 NIL）
+        # 4. 决策
         if best["score"] >= min_score:
             linked = best
         else:
@@ -110,50 +130,35 @@ def predict_text(
 
     return results
 
-
 # ------------------------------------------------
 # CLI 入口
 # ------------------------------------------------
 if __name__ == "__main__":
     setup_logging()
-
+    
+    # 1. 确保加载的是你刚刚训练好的新模型
     model_path = os.path.join(str(Config.MODEL_DIR), "aligner_rf.joblib")
     db_path = str(Config.DB_PATH)
-
-    print(f"[INFO] Loading model from {model_path}")
     clf = joblib.load(model_path)
-
+    
     aligner = MedicalEntityAligner()
-    linker = UniversalEntityLinker(
-        db_path=db_path,
-        threshold=Config.ENTITY_LINKING_THRESHOLD
-    )
+    linker = UniversalEntityLinker(db_path=db_path, threshold=0.5)
 
-    # 🔍 测试文本
-    text = "患者因胃癌入院，既往高血压史，行胃癌根治术。"
+    # 2. 模拟一个更有挑战性的场景（包含别名、简称、同音干扰）
+    test_texts = [
+        "患者表现为典型的HTN症状，伴有胸闷，怀疑是CAD引起的心肌梗死。",
+        "医生开具了阿斯匹林用于抗凝，患者既往有糖尿病病史。",
+        "行胃癌根治术后，切除组织送病理检查。"
+    ]
 
-    print("\n[INPUT TEXT]")
-    print(text)
+    for text in test_texts:
+        print(f"\n[分析文本]: {text}")
+        results = predict_text(text, clf, aligner, linker, topk=3)
+        
+        for r in results:
+            print(f"  - Mention: {r['mention']} ({r['span']})")
+            if r["linked_entity"]:
+                print(f"    → 链接到: {r['linked_entity']['entity_name']} (得分: {r['linked_entity']['score']:.4f})")
+            else:
+                print(f"    → 链接到: NIL (未找到合适匹配)")
 
-    results = predict_text(
-        text,
-        clf,
-        aligner,
-        linker,
-        topk=3,
-        min_score=0.4
-    )
-
-    print("\n[LINK RESULTS]")
-    for r in results:
-        print("--------------------------------------------------")
-        print(f"Mention: {r['mention']}  Span: {r['span']}")
-        if r["linked_entity"]:
-            print(f"→ Linked: {r['linked_entity']['entity_name']} "
-                  f"(score={r['linked_entity']['score']:.3f})")
-        else:
-            print("→ Linked: NIL")
-
-        print("Candidates:")
-        for c in r["candidates"]:
-            print(f"   - {c['entity_name']} ({c['entity_type']}) score={c['score']:.3f}")

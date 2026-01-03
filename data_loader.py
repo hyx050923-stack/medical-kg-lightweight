@@ -1,4 +1,6 @@
 # data_loader.py
+import pandas as pd
+import ast
 import json
 import logging
 from typing import Iterator, Dict, List
@@ -178,6 +180,64 @@ class YiduS4KDataLoader:
                             "text": text,
                             "entities": entities
                         }
+
+    def load_task2_training(self):
+        """
+        [针对你的 subtask2.xlsx 定制]
+        读取扁平的 Excel 表格，并转换为图谱关系
+        列名：原文, 肿瘤原发部位, 原发病灶大小, 转移部位
+        """
+        # 你的文件名
+        file_path = self.data_dir / "subtask2_training_part1.xlsx"
+        
+        if not file_path.exists():
+            print(f"[WARN] 文件不存在: {file_path}")
+            return
+
+        try:
+            # 读取 Excel (需要 pip install pandas openpyxl)
+            df = pd.read_excel(file_path)
+            # 兼容：如果读出来是 Sheet1/Sheet2 这种多表结构，pd.read_excel 默认读第一个 sheet，通常是对的
+            
+            print(f"[INFO] 成功读取 Excel，共 {len(df)} 条数据")
+            
+            for _, row in df.iterrows():
+                text = str(row.get('原文', ''))
+                primary_site = str(row.get('肿瘤原发部位', '')).strip()
+                size = str(row.get('原发病灶大小', '')).strip()
+                metastasis = str(row.get('转移部位', '')).strip()
+                
+                # 跳过无效数据 (NaN)
+                if primary_site == 'nan' or not primary_site:
+                    continue
+                    
+                relations = []
+                
+                # 1. 构建关系: [原发部位] --转移至--> [转移部位]
+                if metastasis and metastasis != 'nan':
+                    # 可能有多个转移部位，用逗号分隔? 简单起见先当成一个
+                    relations.append({
+                        'subject': primary_site,
+                        'predicate': '转移至',
+                        'object': metastasis
+                    })
+                
+                # 2. 构建关系: [原发部位] --大小--> [大小]
+                if size and size != 'nan':
+                    relations.append({
+                        'subject': primary_site,
+                        'predicate': '大小',
+                        'object': size
+                    })
+
+                if relations:
+                    yield {
+                        'text': text,
+                        'relations': relations
+                    }
+                    
+        except Exception as e:
+            print(f"[ERROR] 读取 Excel 失败: {e}")
 
     def _bio_to_record(self, chars, labels):
         text = "".join(chars)

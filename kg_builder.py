@@ -73,7 +73,9 @@ class MedicalKGBuilder:
                 evidence TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (source_entity_id) REFERENCES entities(id) ON DELETE CASCADE,
-                FOREIGN KEY (target_entity_id) REFERENCES entities(id) ON DELETE CASCADE
+                FOREIGN KEY (target_entity_id) REFERENCES entities(id) ON DELETE CASCADE,
+                -- 【新增】唯一约束：防止同一对关系重复插入
+                UNIQUE(source_entity_id, relation_type, target_entity_id)
             );
             CREATE INDEX IF NOT EXISTS idx_relation_type ON relationships(relation_type);
             CREATE INDEX IF NOT EXISTS idx_source_entity ON relationships(source_entity_id);
@@ -184,15 +186,16 @@ class MedicalKGBuilder:
                         evidence: str = None) -> Optional[int]:
         try:
             cursor = self.conn.cursor()
+            # 【修改】使用 OR IGNORE，如果关系已存在则直接跳过，不报错
             cursor.execute(
-                """INSERT INTO relationships 
+                """INSERT OR IGNORE INTO relationships 
                    (source_entity_id, relation_type, target_entity_id, confidence, evidence)
                    VALUES (?, ?, ?, ?, ?)""",
                 (source_entity_id, relation_type, target_entity_id, confidence, evidence)
             )
+            # 注意：如果是 IGNORE，lastrowid 可能是 0，但这不影响逻辑
             relationship_id = cursor.lastrowid
             self.conn.commit()
-            logger.debug(f"已添加关系: {source_entity_id} --{relation_type}--> {target_entity_id}")
             return relationship_id
         except sqlite3.Error as e:
             logger.error(f"添加关系失败:  {e}")

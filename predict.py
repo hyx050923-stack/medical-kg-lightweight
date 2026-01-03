@@ -11,6 +11,7 @@ from entity_linker import UniversalEntityLinker
 from entity_recognizer import MedicalEntityRecognizer
 from logger_config import setup_logging
 
+STOP_MENTIONS = {"切除", "检查", "手术", "治疗", "病变", "炎症", "组织", "症状", "病史"}
 
 # ------------------------------------------------
 # Entity Ranking 核心函数
@@ -69,6 +70,15 @@ def predict_text(
     
     results = []
     for mention_text, mention_type, span in mentions:
+        # 【新增】停用词过滤：解决 "切除" -> "xx切除术" 的乱连问题
+        if mention_text in STOP_MENTIONS:
+            results.append({
+                "mention": mention_text,
+                "span": span,
+                "linked_entity": None,
+                "candidates": []
+            })
+            continue
         # 2. 获取候选
         candidates = linker.get_candidates(
             mention_text, 
@@ -98,17 +108,22 @@ def predict_text(
         # =======================================================
         # 解决 "心肌梗死" 匹配 "急性心肌梗死" 分数过低的问题
         # =======================================================
+        norm_mention = aligner._normalize_abbreviation(mention_text.upper())
+
         for r in ranked:
-            # 如果 mention 被包含在实体名中 (且不是完全不相关的词)
-            if len(mention_text) >= 2 and mention_text in r['entity_name']:
-                # 强行加分 (Boost)
-                # 原始分 0.09 + 0.5 = 0.59 (超过阈值)
-                r['score'] += 0.5
+            
+            # --- 策略 1: 归一化/缩写救援 (最高优先级) ---
+            # 如果归一化后名字完全一样 (HTN -> 高血压 == 高血压)
+            # 这代表命中了我们定义的规则字典，直接置信度拉满
+            if norm_mention == r['entity_name']:
+                r['score'] = 1.0  # 直接满分
                 
-                # 封顶 1.0
-                if r['score'] > 1.0:
-                    r['score'] = 1.0
-        
+            # --- 策略 2: 包含关系救援 (次优先级) ---
+            # 解决 "心肌梗死" 匹配 "急性心肌梗死" (长词包短词)
+            elif len(mention_text) >= 2 and mention_text in r['entity_name']:
+                r['score'] += 0.5  # 强行加分
+                if r['score'] > 1.0: r['score'] = 1.0
+
         # 重新排序（因为分数变了）
         ranked.sort(key=lambda x: x["score"], reverse=True)
         # =======================================================

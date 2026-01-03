@@ -1,133 +1,168 @@
-# medical-kg-lightweight
+# 🏥 Medical-KG-Lightweight: 基于知识图谱的医疗 GraphRAG 系统
 
-轻量级中文医疗知识图谱构建工程（规则 + 传统 ML）。  
-设计目标：无深度学习、无重型依赖，适配中小规模医疗文本的快速落地需求。  
-主要技术栈：jieba（分词） + fuzzywuzzy/rapidfuzz（模糊匹配） + scikit-learn（传统 ML） + SQLite（轻量化存储）。
+> **课程大作业级别项目** | **轻量级** | **完全本地化** | **可解释性**
 
-核心思想（简洁）
-- 文本预处理 → 规则 + 词典抽取实体 → 模糊匹配 + 特征化 + 传统 ML 完成实体对齐/消歧 → 规则优先 + ML 兜底关系抽取 → 入库 SQLite 形成知识图谱。
-
-链接
-- Yidu-S4K 数据集（建议用于阶段一训练/初始化实体库）：https://tianchi.aliyun.com/dataset/144419
-- Yidu-S4K 说明（备用）：http://data.openkg.cn/dataset/groups/yidu-s4k
+本项目实现了一个端到端的**医疗知识图谱构建与应用系统**。它能够从非结构化的电子病历（EMR）中提取实体与关系，构建本地知识图谱（SQLite），并结合大语言模型（DeepSeek-R1 via Ollama）实现**检索增强生成（GraphRAG）**，为用户提供基于医学事实的智能问答与病历结构化服务。
 
 ---
 
-## 目录结构（示例）
-- config.py                 全局配置
-- logger_config.py          日志配置
-- text_preprocessor.py      文本清洗与分词（jieba）
-- data_loader.py            Yidu-S4K 数据加载器
-- entity_recognizer.py      规则 + 词典的实体识别
-- entity_linker.py          通用实体链接（基于 fuzzy/rapidfuzz）
-- entity_alignment.py       实体对齐特征与简单判定器
-- kg_builder.py             SQLite KG 构建（批量/事务/单例连接）
-- run.py             演示脚本：从 Yidu-S4K 提取实体并构建 KG、识别+链接示例
-- requirements.txt          依赖（见说明）
+## ✨ 核心功能 (Key Features)
+
+### 1. 🧠 自动化知识图谱构建 (Auto-KG Construction)
+
+* **多源融合**：支持从结构化数据（Excel/CSV）导入精准属性，同时从非结构化文本中挖掘潜在的共现关系（如：药物-治疗-疾病）。
+* **智能去重**：内置数据库约束与逻辑检查，防止重复知识入库。
+* **别名注入**：支持医疗术语归一化（如 `HTN` -> `高血压`，`MI` -> `心肌梗死`）。
+
+### 2. 🔗 高精度实体链接 (Medical Entity Linking)
+
+* **混合模型**：结合了 **规则匹配**、**模糊检索 (RapidFuzz)** 和 **机器学习排序 (Random Forest)**。
+* **鲁棒性**：能够处理医疗缩写、错别字及长短词匹配（如 `心肌梗死` ↔ `急性下壁心肌梗死`）。
+* **拒识机制**：有效过滤“切除”、“检查”等无意义的泛义词。
+
+### 3. 🤖 GraphRAG 智能诊断助手 (AI Doctor Agent)
+
+* **病历结构化**：自动提取病历中的关键实体，生成标准化 JSON 报告。
+* **图谱增强 (RAG)**：在回答用户问题时，自动检索图谱中的关联知识（如并发症、禁忌症、推荐药物）。
+* **本地大模型**：通过 Ollama 集成 `deepseek-r1:1.5b`，实现完全离线的隐私保护问答。
 
 ---
 
-## 快速开始（5 分钟跑通阶段一）
+## 🛠️ 技术栈 (Tech Stack)
 
-1. 克隆仓库（或把代码放到项目根）
-   ```bash
-   git clone https://github.com/hyx050923-stack/medical-kg-lightweight.git
-   cd medical-kg-lightweight
-   ```
-
-2. 建议使用虚拟环境
-   - Linux / macOS:
-     ```bash
-     python3 -m venv .venv
-     source .venv/bin/activate
-     ```
-   - Windows (PowerShell):
-     ```powershell
-     python -m venv .venv
-     .\.venv\Scripts\Activate.ps1
-     ```
-
-3. 安装依赖
-   注意：Python 自带 sqlite3，无需另外安装 `sqlite3-python`。如果 requirements.txt 中包含该行，请先删除或注释。
-   ```bash
-   pip install -r requirements.txt
-   # 推荐替换 fuzzywuzzy -> rapidfuzz（速度更快），若出现 fuzzywuzzy 安装问题可：
-   pip install rapidfuzz
-   pip install python-Levenshtein   # 可选，加速 fuzzywuzzy（若保留 fuzzywuzzy）
-   ```
-
-4. 下载并准备 Yidu-S4K 数据
-   - 将 Yidu-S4K 数据解压到项目目录的 `data/yidu_s4k/`，或任意路径并设置环境变量：
-     - Linux / macOS:
-       ```bash
-       export YIDU_S4K_PATH=/full/path/to/data/yidu_s4k
-       ```
-     - Windows:
-       ```powershell
-       setx YIDU_S4K_PATH "C:\full\path\to\data\yidu_s4k"
-       ```
-   - 确认文件名（示例）：`subtask1_training_part1.txt`、`subtask1_training_part2.txt`、`subtask1_test_set_with_answer.json` 等。
-
-5. 可选：准备 jieba 医疗词典与停用词
-   - 放 `medical_terms.txt` 和 `stopwords.txt` 到 `data/`（config 中有默认路径）。
-
-6. 运行阶段一脚本（示例）
-   ```bash
-   python run_stage1.py
-   ```
-   脚本流程：
-   - 初始化日志与目录
-   - 加载 Yidu-S4K 并提取实体（可通过参数 limit 控制用于测试的数据量）
-   - 批量写入 SQLite（默认 db：`medical_kg.db`）
-   - 使用示例文本进行实体识别并尝试链接到实体库
-
-7. 查看结果
-   - 日志：`./logs/kg_builder.log`、`./logs/errors.log`
-   - SQLite 数据库：`./medical_kg.db`（可用 DB Browser for SQLite 或 sqlite3 CLI 检查 `entities` / `aliases` / `relationships` 表）
+* **语言**: Python 3.9+
+* **知识库**: SQLite (轻量级图谱存储)
+* **NLP & ML**: `scikit-learn`, `rapidfuzz`, `jieba`, `numpy`, `pandas`
+* **LLM 框架**: Ollama (DeepSeek-R1), `requests`
+* **数据集支持**: Yidu-S4K (CCKS 2019)
 
 ---
 
-## 常见配置（config.py）
-- 数据路径：`Config.YIDU_S4K_DIR` 或环境变量 `YIDU_S4K_PATH`
-- 数据库：`Config.DB_PATH`
-- 实体链接阈值：`Config.ENTITY_LINKING_THRESHOLD`
-- 实体对齐阈值：`Config.ALIGNMENT_THRESHOLD`
-- 若要把模糊匹配改为 rapidfuzz，请在 `entity_linker.py` 中把 fuzzywuzzy 的 `fuzz` 替换为 `rapidfuzz.fuzz`，接口兼容。
+## 🚀 快速开始 (Quick Start)
+
+### 第一步：环境准备
+
+1. **安装 Python 依赖**：
+```bash
+pip install -r requirements.txt
+
+```
+
+
+*(注：需包含 pandas, openpyxl, scikit-learn, joblib, rapidfuzz, tqdm, requests, jieba)*
+2. **安装并启动 Ollama**（用于大模型支持）：
+* 下载安装 [Ollama](https://ollama.com/)。
+* 拉取 DeepSeek 模型：
+```bash
+ollama pull deepseek-r1:1.5b
+
+```
+
+
+* 保持 Ollama 在后台运行。
+
+
+
+### 第二步：准备数据
+
+将 **Yidu-S4K** 数据集文件放入 `data/yidu_s4k/` 目录：
+
+* `subtask1_training_part1.txt` (用于挖掘关系)
+* `subtask2_training_part1.xlsx` (用于导入属性)
+
+### 第三步：构建知识图谱
+
+运行构建脚本，系统将自动进行数据清洗、实体提取、关系挖掘并存入 `medical_kg.db`。
+
+```bash
+python build_full_kg.py
+
+```
+
+*可选：注入常见医疗别名（增强实体链接能力）*
+
+```bash
+python inject_aliases.py
+
+```
+
+### 第四步：训练排序模型 (可选)
+
+如果你需要重新训练实体对齐模型：
+
+```bash
+python train.py
+
+```
+
+### 第五步：启动智能医疗助手
+
+运行 Agent，体验基于图谱的医疗问答：
+
+```bash
+python emr_agent.py
+
+```
 
 ---
 
-## 性能建议（重要）
-- 当实体库 > 1k 时，避免全库两两比较：
-  - 实现 blocking（按实体类型、长度差、关键词过滤候选）能削减 90%+ 无效候选；
-  - 使用 rapidfuzz 替代 fuzzywuzzy 可显著提速；
-  - 预加载实体缓存（实现已包含）并避免频繁 DB 查询。
-- 批量写入时使用事务（kg_builder 已内置批量接口与事务上下文）。
+## 📂 项目结构
+
+```text
+medical-kg-lightweight/
+├── data/                   # 数据存放目录
+│   └── yidu_s4k/           # Yidu-S4K 数据集
+├── models/                 # 模型保存目录 (Random Forest)
+├── logs/                   # 运行日志
+├── medical_kg.db           # SQLite 知识图谱文件
+│
+├── kg_builder.py           # 数据库底层操作 (DAO层)
+├── build_full_kg.py        # 图谱构建脚本 (ETL + 文本挖掘)
+├── inject_aliases.py       # 别名注入工具
+│
+├── entity_recognizer.py    # 命名实体识别 (NER)
+├── entity_linker.py        # 实体召回 (Blocking)
+├── entity_alignment.py     # 实体对齐特征提取
+├── train.py                # 排序模型训练脚本
+├── predict.py              # 实体链接推理接口
+│
+├── emr_agent.py            # [核心] 智能病历 Agent + GraphRAG
+├── data_loader.py          # 数据加载器 (支持 JSONL/Excel)
+├── config.py               # 全局配置
+└── requirements.txt        # 项目依赖
+
+```
 
 ---
 
-## 故障排查
-- 找不到数据或文件路径错误：确认 `YIDU_S4K_PATH` 指向包含 `subtask1_training_part*.txt` 的目录。
-- sqlite 锁或并发写入错误：请确保单进程写入或使用 kg_builder 中的单例连接；避免多进程同时写同一文件。
-- fuzzywuzzy 过慢或安装失败：优先安装 `python-Levenshtein` 或直接使用 `rapidfuzz`。
-- jieba 未识别医学词：加载自定义词典 `data/medical_terms.txt` 并在 TextPreprocessor 中指定路径。
+## 📊 效果展示
+
+### 场景：高血压患者咨询
+
+**输入病历**：
+
+> "患者出现剧烈头痛，伴有发热症状，既往有高血压病史。"
+
+**系统处理流程**：
+
+1. **实体提取**：`头痛`、`发热`、`高血压`
+2. **知识检索**：
+* `高血压` --(has_symptom)--> `头晕`, `头痛`, `心悸`
+* `阿司匹林` --(treated_by)--> `高血压`
+
+
+3. **LLM 生成**：
+> "根据患者的高血压病史...图谱显示高血压常伴随头痛风险...建议监测血压，并在医生指导下使用阿司匹林或降压药物..."
+
+
 
 ---
 
-## 下一步建议（可选）
-- 为 entity_linker 添加 blocking 模块（按 type/length/keywords 过滤候选）。
-- 使用 `entity_alignment.extract_features` 构建训练集并用随机森林训练实体对齐分类器。
-- 关系抽取从二分类扩展为多分类（不同的关系类型）。
-- 增强异常处理与单元测试，完善 CI。
+## 📝 引用与致谢
+
+* 数据集来源：CCKS 2019 Yidu-S4K
+* 模型支持：DeepSeek-AI
 
 ---
 
-## 贡献 & 许可证
-- 欢迎 Issues / PR（请在提交前确保不包含敏感病历原文）。  
-- 本项目未包含商业授权声明；请根据你的组织政策与 Yidu-S4K 使用许可处理数据与分发。
-
----
-
-如需我为你：
-- 生成带有 blocking 的 entity_linker 示例；
-- 把 fuzzywuzzy 全部替换为 rapidfuzz 的 PR 补丁；
-- 或者自动生成更详细的部署文档与 demo 数据集子集（用于快速测试）——告诉我你想做哪一项，我会直接把修改/补丁内容给你。
+**© 2026 Medical-KG-Lightweight Course Project**
